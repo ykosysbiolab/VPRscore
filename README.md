@@ -8,7 +8,7 @@ VPRscore estimates the functional impact of genetic variants by comparing the **
 
 Variant-level signals are combined with (optional) CADD annotations and aggregated to produce a **sample-level VPRscore**.
 
-<img src="./img/main.png" title="VPRscore_workflow"/>
+<img src="./main.png" title="VPRscore_workflow"/>
 
 ---
 
