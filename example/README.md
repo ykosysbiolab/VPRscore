@@ -16,5 +16,5 @@
 - tmp_interval.cadd.tsv.gz
 - chr19.fa
 
-*try chr19.fa from the link below
+Try chr19.fa from the link below \
 [Download chr19.fa](https://hgdownload.cse.ucsc.edu/goldenpath/hg38/chromosomes/chr19.fa.gz)
