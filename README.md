@@ -56,20 +56,45 @@ pip install -r requirements.txt
 ## Usage
 
 ### 1. Input preparation
+This step subsets the input VCF and CADD files to the target regions (BED) and produces filtered files that can be reused in both multi-sample and single-sample modes.
+
+   ```bash
+    python3 prep_vprscore_input.py  \
+       --vcf example/example.vcf  \
+       --cadd [path to CADD]  \
+       --regions example/tmp_interval.bed \
+       --out-prefix tmp_interval \
+       &> input_prep_log
+  
+    python3 prep_vprscore_input.py  \
+      --vcf example/example_multi.vcf.gz  \
+      --cadd [path to CADD]  \
+      --regions example/tmp_interval.bed \
+      --out-prefix tmp_interval_multi  \
+      &> input_prep_log
+
+  ```
+
 
 ### 2.1 Multi-sample mode (recommended)
 Compute variant-level VPR and sample-level VPRscores from a merged multi-sample VCF in a single command:
   
    ```bash
-    python src/run_multisample_vprscore.py \
-    --vcf merged.biallelic.vcf.gz \
-    --fasta GRCh38.fa \
-    --regions regions.bed \
-    --cadd cadd_preprocessed.tsv.gz \
-    --alpha 0.5 \
-    --beta 0.2 \
-    --out ./multisample_vprscore.tsv
-  ```
+    python3 src/calc_multisample_vprPrep.py \
+      --vcf example/tmp_interval_multi.filtered.vcf.gz \
+      --cadd example/tmp_interval_multi.cadd.tsv.gz  \
+      --fasta example/chr19.fa  \
+      --out ./multi_prep.txt \
+      &> multiprep_log
+
+    python3 src/run_multisample_vprscore.py \
+      --vcf example/tmp_interval_multi.filtered.vcf.gz \
+      --vprPrep ./multi_prep.txt \
+      --alpha 0.5 \
+      --beta 0.2 \
+      --out ./multisample_vprscore.tsv \
+      &> multi_run_logs
+   ```
 
 ### 2.2 Alternative: one-step workflow (single-sample mode)
 For small datasets or quick testing, VPRscore can also be computed directly from a single-sample VCF in one step.
@@ -78,9 +103,11 @@ For small datasets or quick testing, VPRscore can also be computed directly from
   python3 run_singlesample_vprscore.py \
     --vcf example/tmp_interval.filtered.vcf.gz \
     --cadd example/tmp_interval.cadd.tsv.gz \
-    --fasta example/chr19.fa
-    --out out.txt
-    &> logs
+    --fasta example/chr19.fa \
+    --alpha 0.5 \
+    --beta 0.2 \
+    --out singlesample_vprscore.tsv \
+    &> single_run_logs
   ```
 
 ## Inputs / Output
