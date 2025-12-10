@@ -55,50 +55,32 @@ pip install -r requirements.txt
 
 ## Usage
 
-### Recommended: 2-step workflow (multi-sample mode)
+### Multi-sample mode (recommended)
 
-In the recommended workflow, VPRscore is computed in two stages:
-
-1. Step 1 – Variant-level VPR
-   Compute VPR (and variant-level scores) once for all variants in a merged multi-sample VCF.
-
-2. Step 2 – Sample-level VPRscore
-   Reuse the variant-level scores together with genotypes to aggregate sample-level VPRscores.
-
-This avoids recomputing the Nucleotide Transformer output for the same variant across many samples.
-
-  #### Step 1: Compute variant-level VPR
+Compute variant-level VPR and sample-level VPRscores from a merged multi-sample VCF in a single command:
   
-  ```bash
-  python src/calculate_variant_vpr.py \
+   ```bash
+    python src/run_multisample_vprscore.py \
     --vcf data/merged.biallelic.vcf.gz \
     --fasta data/GRCh38.fa \
     --regions data/regions.bed \
     --cadd data/cadd_preprocessed.tsv.gz \
-    --out results/variants_vpr.tsv
-  ```
-  #### Step 2: Compute sample-level VPRscore
-  ```bash
-  python src/compute_sample_vprscore.py \
-    --vcf data/merged.biallelic.vcf.gz \
-    --variant-vpr results/variants_vpr.tsv \
-    --out results/sample_vprscore.tsv \
     --alpha 0.5 \
-    --beta 0.2
+    --beta 0.2 \
+    --out-prefix results/multisample
   ```
 
 ### 2.2 Alternative: one-step workflow (single-sample mode)
-For small datasets or quick testing, VPRscore can also be computed directly from a single-sample VCF in one step. In this mode, the script computes variant-level VPR and immediately aggregates a VPRscore for that sample.
+For small datasets or quick testing, VPRscore can also be computed directly from a single-sample VCF in one step.
+
   ```bash
-  python src/run_single_sample_vprscore.py \
+  python src/run_singlesample_vprscore.py \
     --vcf data/sample1.biallelic.vcf.gz \
     --fasta data/GRCh38.fa \
     --regions data/regions.bed \
     --cadd data/cadd_preprocessed.tsv.gz \
-    --sample-id sample1 \
     --out results/sample1_variants_vpr.tsv \
     --beta 0.2
-  
   ```
 
 ## Inputs / Output
