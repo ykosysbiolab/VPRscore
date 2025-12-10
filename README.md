@@ -46,7 +46,7 @@ pip install -r requirements.txt
   - Indexed with samtools faidx
  
 - CADD tsv.gz (for annotation integration)
-  - Download from the official CADD website: https://cadd.gs.washington.edu/download
+  - Download whole_genome_SNVs.tsv.gz and whole_genome_SNVs.tsv.gz.tbi from the official CADD website: https://cadd.gs.washington.edu/download
   - Use the file matching your genome build (e.g. "All possible SNVs of GRCh38/hg38" for hg38) 
 
 - Target region BED file
