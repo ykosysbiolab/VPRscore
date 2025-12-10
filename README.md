@@ -55,7 +55,9 @@ pip install -r requirements.txt
 
 ## Usage
 
-### Multi-sample mode (recommended)
+### 1. Input preparation
+
+### 2.1 Multi-sample mode (recommended)
 Compute variant-level VPR and sample-level VPRscores from a merged multi-sample VCF in a single command:
   
    ```bash
@@ -72,15 +74,13 @@ Compute variant-level VPR and sample-level VPRscores from a merged multi-sample 
 ### 2.2 Alternative: one-step workflow (single-sample mode)
 For small datasets or quick testing, VPRscore can also be computed directly from a single-sample VCF in one step.
 
-  ```bash
-  python src/run_singlesample_vprscore.py \
-    --vcf sample1.biallelic.vcf.gz \
-    --fasta GRCh38.fa \
-    --regions regions.bed \
-    --cadd cadd_preprocessed.tsv.gz \
-    --alpha 0.5 \
-    --beta 0.2 \
-    --out ./singlesample_vprscore.txt
+  ```bash  
+  python3 run_singlesample_vprscore.py \
+    --vcf example/tmp_interval.filtered.vcf.gz \
+    --cadd example/tmp_interval.cadd.tsv.gz \
+    --fasta example/chr19.fa
+    --out out.txt
+    &> logs
   ```
 
 ## Inputs / Output
