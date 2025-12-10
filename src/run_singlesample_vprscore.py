@@ -11,7 +11,6 @@ import math
 import gzip
 from nucleotide_transformer.pretrained import get_pretrained_model
 
-
 def get_sequence_from_fasta(chrom, start, end, fasta_file):
     cmd = f"samtools faidx {fasta_file} {chrom}:{start}-{end}"
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -157,11 +156,13 @@ def run_single_sample_vprscore(vcf, fasta, cadd, alpha, beta, out_path):
             scores_with_cadd.append(single_score_cadd)
     
     prs = compute_prs(scores_with_cadd, beta=beta)
-    with open(out_path, "w") as fout:
-        fout.write("# VPRscore (single-sample mode)\n")
-        fout.write(f"VPRscore\t{prs:.6f}\n")
+    score_sum = sum(scores_with_cadd)
+    count = len(scores_with_cadd)
+    average = score_sum / count
 
-    print(prs)
+    with open(out_path, "w") as fout:
+        fout.write("Sample_ID\tScore_Sum\tCount\tAverage\tAdjusted_Average\n")
+        fout.write(f"Sample\t{score_sum:.6f}\t{count}\t{average:.6f}\t{prs:.6f}\n")
 
 
 def parse_args():
