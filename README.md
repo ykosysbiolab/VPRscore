@@ -56,18 +56,17 @@ pip install -r requirements.txt
 ## Usage
 
 ### Multi-sample mode (recommended)
-
 Compute variant-level VPR and sample-level VPRscores from a merged multi-sample VCF in a single command:
   
    ```bash
     python src/run_multisample_vprscore.py \
-    --vcf data/merged.biallelic.vcf.gz \
-    --fasta data/GRCh38.fa \
-    --regions data/regions.bed \
-    --cadd data/cadd_preprocessed.tsv.gz \
+    --vcf merged.biallelic.vcf.gz \
+    --fasta GRCh38.fa \
+    --regions regions.bed \
+    --cadd cadd_preprocessed.tsv.gz \
     --alpha 0.5 \
     --beta 0.2 \
-    --out-prefix results/multisample
+    --out ./multisample_vprscore.tsv
   ```
 
 ### 2.2 Alternative: one-step workflow (single-sample mode)
@@ -75,12 +74,13 @@ For small datasets or quick testing, VPRscore can also be computed directly from
 
   ```bash
   python src/run_singlesample_vprscore.py \
-    --vcf data/sample1.biallelic.vcf.gz \
-    --fasta data/GRCh38.fa \
-    --regions data/regions.bed \
-    --cadd data/cadd_preprocessed.tsv.gz \
-    --out results/sample1_variants_vpr.tsv \
-    --beta 0.2
+    --vcf sample1.biallelic.vcf.gz \
+    --fasta GRCh38.fa \
+    --regions regions.bed \
+    --cadd cadd_preprocessed.tsv.gz \
+    --alpha 0.5 \
+    --beta 0.2 \
+    --out ./singlesample_vprscore.txt
   ```
 
 ## Inputs / Output
@@ -94,9 +94,8 @@ For small datasets or quick testing, VPRscore can also be computed directly from
 - `--beta` : Scaling parameter controlling variant-count weighting. (larger beta increases variant-count weighting, default=0.2)
 
 ### Output
-- `variants_vpr.tsv` : per-variant vpr score from step 1 of 2-step workflow
-- `VPRscore.tsv` : per-sample VPRscore results
-
+- `multisample_vprscore.tsv` : per-sample VPRscore results
+- `singlesample_vprscore.txt` : single VPRscore value result
 ---
 
 #### Contact
