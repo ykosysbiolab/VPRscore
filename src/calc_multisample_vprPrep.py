@@ -9,10 +9,6 @@ import sys
 import re
 import math
 import gzip
-
-
-
-sys.path.append("/mss_dc/project/ny/VEP/conda/prog/nucleotide-transformer/") #
 from nucleotide_transformer.pretrained import get_pretrained_model
 
 def get_sequence_from_fasta(chrom, start, end, fasta_file):
