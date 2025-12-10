@@ -119,6 +119,7 @@ For small datasets or quick testing, VPRscore can also be computed directly from
 - `--cadd` : Preprocessed CADD table.
 - `--alpha` : Variant-level weight for combining sequence-based risk and CADD. (alpha weight for vpr, default=0.5)
 - `--beta` : Scaling parameter controlling variant-count weighting. (larger beta increases variant-count weighting, default=0.2)
+- `--vprPrep` : Path to the per-variant score table produced by calc_multisample_vprPrep.py (tab-delimited with columns: #chr, pos, ref, alt, n_vpr, n_cadd).
 
 ### Output
 - `multisample_vprscore.tsv` : per-sample VPRscore results
