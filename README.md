@@ -59,14 +59,14 @@ pip install -r requirements.txt
 This step subsets the input VCF and CADD files to the target regions (BED) and produces filtered files that can be reused in both multi-sample and single-sample modes.
 
    ```bash
-    python3 prep_vprscore_input.py  \
+    python3 src/prep_vprscore_input.py  \
        --vcf example/example.vcf  \
        --cadd [path to CADD]  \
        --regions example/tmp_interval.bed \
        --out-prefix tmp_interval \
        &> input_prep_log
   
-    python3 prep_vprscore_input.py  \
+    python3 src/prep_vprscore_input.py  \
       --vcf example/example_multi.vcf.gz  \
       --cadd [path to CADD]  \
       --regions example/tmp_interval.bed \
@@ -100,7 +100,7 @@ Compute variant-level VPR and sample-level VPRscores from a merged multi-sample 
 For small datasets or quick testing, VPRscore can also be computed directly from a single-sample VCF in one step.
 
   ```bash  
-  python3 run_singlesample_vprscore.py \
+  python3 src/run_singlesample_vprscore.py \
     --vcf example/tmp_interval.filtered.vcf.gz \
     --cadd example/tmp_interval.cadd.tsv.gz \
     --fasta example/chr19.fa \
