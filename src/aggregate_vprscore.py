@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """
-aggregate_vprscore.py (구 run_multisample_vprscore.py)
+aggregate_vprscore.py (formerly run_multisample_vprscore.py)
 
-calc_vprPrep.py가 만든 variant-level 테이블 + VCF의 genotype을 합쳐서
-sample-level VPRscore를 계산한다.
+Combines the variant-level table produced by calc_vprPrep.py with a VCF's
+genotypes to compute sample-level VPRscores.
 
-VCF는 single-sample이든 multi-sample이든 상관없다 (#CHROM 라인의 샘플
-컬럼 수만큼 알아서 처리) -- 그래서 별도의 "single-sample 스크립트"가
-필요 없다.
+Works with either a single-sample or multi-sample VCF (handles however many
+sample columns are on the #CHROM line) -- so no separate "single-sample
+script" is needed.
+
+--vcf can also take multiple files (e.g. per-chromosome VCF splits).
+Sample-level summation (sample_scores[j] += s_i) is associative regardless
+of order, so there's no need to concat into a genome-wide VCF first --
+each file can just be scanned and accumulated in turn. Sample columns
+across multiple VCFs are matched by ID, not position (safe even if sample
+order differs, or only partially overlaps, across files).
 """
 
 import argparse
@@ -23,13 +30,14 @@ def extract_sample_ids(vcf_path):
         for line in f:
             if line.startswith("#CHROM"):
                 return line.strip().split("\t")[9:]
-    raise ValueError(f"{vcf_path}에서 #CHROM 라인을 찾을 수 없습니다.")
+    raise ValueError(f"Could not find a #CHROM line in {vcf_path}.")
 
 
 def load_variant_table(variant_table_path):
     """
-    n_vpr이 "NA"인 행(=calc_vprPrep.py --cadd-only로 만든 결과)은
-    n_vpr=None으로 저장해두고, 합산 시 CADD 점수만 사용한다.
+    Rows where n_vpr is "NA" (i.e. produced by calc_vprPrep.py --cadd-only)
+    are stored with n_vpr=None, and only the CADD score is used for them
+    when summing.
     """
     variant_dict = {}
     with open_maybe_gzip(variant_table_path) as f:
@@ -48,18 +56,82 @@ def load_variant_table(variant_table_path):
 
 def compute_single_variant_score(n_vpr, n_cadd, alpha):
     """s_i = alpha * n_vpr + (1-alpha) * n_cadd.
-    n_vpr이 None(CADD-only로 계산된 variant)이면 CADD만 사용한다."""
+    If n_vpr is None (a CADD-only-scored variant), only CADD is used."""
     if n_vpr is None:
         return n_cadd
     return alpha * n_vpr + (1.0 - alpha) * n_cadd
 
 
+def process_vcf(vcf_path, variant_table, alpha, sample_index, sample_scores, sample_counts):
+    """Scan a single VCF and accumulate into sample_scores/sample_counts.
+    sample_index: {sample_id: global_index} -- maps a sample_id seen in any
+    VCF to the same position in the global arrays. Safe even if sample
+    order differs across VCFs, or sample sets only partially overlap.
+    Returns: how many observations in this VCF used a CADD-only
+    (n_vpr=NA) score."""
+    n_cadd_only_obs = 0
+    with open_maybe_gzip(vcf_path) as f:
+        col_to_global = None
+        for line in f:
+            if not line.strip():
+                continue
+            if line.startswith("#CHROM"):
+                local_samples = line.strip().split("\t")[9:]
+                unknown = [s for s in local_samples if s not in sample_index]
+                if unknown:
+                    raise ValueError(
+                        f"{vcf_path}: found sample ID(s) not present in the first VCF: "
+                        f"{unknown[:5]}{' ...' if len(unknown) > 5 else ''} -- "
+                        "all VCFs must share the same sample set (subsets are OK)."
+                    )
+                col_to_global = [sample_index[s] for s in local_samples]
+                continue
+            if line.startswith("#"):
+                continue
+            if col_to_global is None:
+                raise ValueError(f"{vcf_path}: found a data line before the #CHROM header.")
+            cols = line.rstrip("\n").split("\t")
+            if len(cols) < 10:
+                continue
+            chrom_raw, pos, ref, alt = cols[0], int(cols[1]), cols[3], cols[4]
+            if "," in alt:
+                continue
+            key = (norm_chrom(chrom_raw), pos, ref, alt)
+            if key not in variant_table:
+                continue
+            n_vpr, n_cadd = variant_table[key]
+            if n_vpr is None:
+                n_cadd_only_obs += 1
+            s_i = compute_single_variant_score(n_vpr, n_cadd, alpha)
+
+            fmt = cols[8].split(":")
+            gt_idx = fmt.index("GT") if "GT" in fmt else 0
+
+            for local_j, global_j in enumerate(col_to_global):
+                fields = cols[9 + local_j].split(":")
+                if gt_idx >= len(fields):
+                    continue
+                gt = fields[gt_idx]
+                if gt in {".", "./.", ".|."}:
+                    continue
+                alleles = re.split(r"[/|]", gt)
+                if "1" in alleles:
+                    sample_scores[global_j] += s_i
+                    sample_counts[global_j] += 1
+    return n_cadd_only_obs
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Compute sample-level VPRscores from a VCF (single- or multi-sample) "
-                    "and a precomputed variant-level table."
+        description="Compute sample-level VPRscores from one or more VCFs (single- or "
+                    "multi-sample, e.g. per-chromosome splits) and a precomputed variant-level "
+                    "table. Multiple --vcf files are matched by sample ID and accumulated "
+                    "together, so a genome-wide concat is not required."
     )
-    parser.add_argument("--vcf", required=True, help="Biallelic VCF (single- or multi-sample).")
+    parser.add_argument("--vcf", required=True, nargs="+",
+                         help="One or more biallelic VCFs, e.g. per-chromosome splits sharing "
+                              "the same samples. Sample columns are matched by ID across files, "
+                              "not by column position.")
     parser.add_argument("--vprPrep", required=True,
                          help="calc_vprPrep.py (or merge_vprPrep.py) output: #chr pos ref alt n_vpr n_cadd")
     parser.add_argument("--alpha", type=float, default=0.5,
@@ -73,44 +145,20 @@ def main():
     args = parser.parse_args()
 
     variant_table = load_variant_table(args.vprPrep)
-    sample_ids = extract_sample_ids(args.vcf)
+
+    # Use the first VCF's sample order as the global reference order.
+    sample_ids = extract_sample_ids(args.vcf[0])
+    sample_index = {s: i for i, s in enumerate(sample_ids)}
     num_samples = len(sample_ids)
     sample_scores = [0.0] * num_samples
     sample_counts = [0] * num_samples
     n_cadd_only_obs = 0
 
-    with open_maybe_gzip(args.vcf) as f:
-        for line in f:
-            if not line.strip() or line.startswith("#"):
-                continue
-            cols = line.rstrip("\n").split("\t")
-            if len(cols) < 10:
-                continue
-            chrom_raw, pos, ref, alt = cols[0], int(cols[1]), cols[3], cols[4]
-            if "," in alt:
-                continue
-            key = (norm_chrom(chrom_raw), pos, ref, alt)
-            if key not in variant_table:
-                continue
-            n_vpr, n_cadd = variant_table[key]
-            if n_vpr is None:
-                n_cadd_only_obs += 1
-            s_i = compute_single_variant_score(n_vpr, n_cadd, args.alpha)
-
-            fmt = cols[8].split(":")
-            gt_idx = fmt.index("GT") if "GT" in fmt else 0
-
-            for j in range(num_samples):
-                fields = cols[9 + j].split(":")
-                if gt_idx >= len(fields):
-                    continue
-                gt = fields[gt_idx]
-                if gt in {".", "./.", ".|."}:
-                    continue
-                alleles = re.split(r"[/|]", gt)
-                if "1" in alleles:
-                    sample_scores[j] += s_i
-                    sample_counts[j] += 1
+    for vcf_path in args.vcf:
+        sys.stderr.write(f"[aggregate_vprscore] Processing {vcf_path} ...\n")
+        n_cadd_only_obs += process_vcf(
+            vcf_path, variant_table, args.alpha, sample_index, sample_scores, sample_counts,
+        )
 
     if n_cadd_only_obs > 0:
         sys.stderr.write(

@@ -9,7 +9,7 @@ from vpr_engine import open_maybe_gzip, norm_chrom
 
 
 def ensure_bgzipped_vcf(vcf_path):
-    """.vcf.gz면 그대로, .vcf면 bgzip + tabix 색인해서 반환."""
+    """Return as-is if it's already .vcf.gz; if it's .vcf, bgzip + tabix-index it first."""
     if vcf_path.endswith(".vcf.gz"):
         return vcf_path, False  # (path, is_temp)
 
@@ -29,7 +29,7 @@ def ensure_bgzipped_vcf(vcf_path):
 
 
 def filter_vcf_by_regions(vcf_path, regions_path, out_vcf_path):
-    """bcftools로 VCF를 BED 리전으로 필터링하고 bgzip+색인까지 만든다."""
+    """Filter a VCF to BED regions with bcftools, producing a bgzipped, indexed output."""
     vcf_bgz, is_temp = ensure_bgzipped_vcf(vcf_path)
 
     cmd_view = ["bcftools", "view", "-R", regions_path, "-Oz", "-o", out_vcf_path, vcf_bgz]
@@ -51,11 +51,11 @@ def filter_vcf_by_regions(vcf_path, regions_path, out_vcf_path):
 
 def collect_variant_keys_from_vcf(vcf_path):
     """
-    필터링된 VCF에서 (chrom, pos, ref, alt) 키를 모은다.
-    chrom은 VCF에 적힌 원본 표기 그대로 유지한다 (아래 subset_cadd에서
-    이 원본 표기로 CADD 출력을 재작성하기 때문에, FASTA/samtools faidx와
-    naming convention이 항상 일치하게 됨).
-    biallelic VCF를 가정한다 (ALT에 콤마 없음).
+    Collect (chrom, pos, ref, alt) keys from the filtered VCF.
+    chrom is kept exactly as written in the VCF (subset_cadd below rewrites
+    the CADD output using this original notation, so it always matches the
+    FASTA/samtools faidx naming convention).
+    Assumes a biallelic VCF (no comma in ALT).
     """
     variant_keys = set()
     n_lines = 0
@@ -89,19 +89,21 @@ def collect_variant_keys_from_vcf(vcf_path):
 
 def subset_cadd(cadd_path, regions_path, variant_keys, out_cadd_path):
     """
-    CADD 파일에서 variant_keys에 있는 (chrom,pos,ref,alt)만 뽑아 out_cadd_path에 쓴다.
+    Extract only the (chrom, pos, ref, alt) rows present in variant_keys from
+    the CADD file and write them to out_cadd_path.
 
-    매칭은 chr 접두어 유무에 관계없이(norm_chrom) 하되, **출력에는 항상
-    VCF 쪽 원본 chrom 표기를 쓴다.** CADD 파일의 chrom 표기(보통 접두어 없음)와
-    VCF/FASTA의 표기(예: 'chr19')가 다를 수 있는데, 이후 단계(calc_vprPrep.py)는
-    이 출력 파일의 chrom 컬럼을 그대로 samtools faidx에 넘기기 때문에,
-    여기서 표기를 통일해두지 않으면 FASTA에서 조용히 서열을 못 찾는
-    (그리고 결국 IndexError로 죽는) 버그가 생긴다.
+    Matching is done regardless of a 'chr' prefix (via norm_chrom), but the
+    **output always uses the VCF's original chrom notation.** The CADD
+    file's chrom notation (usually no prefix) can differ from the VCF/FASTA's
+    (e.g. 'chr19'); the next step (calc_vprPrep.py) passes this output file's
+    chrom column straight to samtools faidx, so failing to unify the notation
+    here causes a silent sequence-fetch failure (eventually crashing with an
+    IndexError).
     """
     matched = 0
     total = 0
 
-    # norm_chrom(key) -> VCF 원본 chrom 표기
+    # norm_chrom(key) -> original VCF chrom notation
     key_to_orig_chrom = {
         (norm_chrom(chrom), pos, ref, alt): chrom
         for chrom, pos, ref, alt in variant_keys

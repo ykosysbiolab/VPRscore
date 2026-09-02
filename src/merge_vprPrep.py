@@ -2,13 +2,15 @@
 """
 merge_vprPrep.py
 
-calc_vprPrep.py를 --chrom으로 나눠서 병렬로 돌린 결과 파일들
-(혹은 --cadd-only로 만든 결과와 모델로 만든 결과가 섞인 경우도)
-하나의 vprPrep 테이블로 합친다.
+Merges the output files from running calc_vprPrep.py in parallel with
+--chrom splits (or a mix of --cadd-only and NT-model outputs) into a single
+vprPrep table.
 
-- 헤더는 한 번만 씀
-- (chrom,pos,ref,alt) key가 여러 파일에 중복되면 경고를 남기고 처음 값만 유지
-- 입력 파일들은 순서 보장 없이 그대로 이어붙임 (정렬이 필요하면 별도로)
+- The header is written only once.
+- If a (chrom,pos,ref,alt) key is duplicated across files, a warning is
+  logged and only the first value is kept.
+- Input files are concatenated in the given order with no re-sorting
+  (sort separately if needed).
 """
 
 import argparse

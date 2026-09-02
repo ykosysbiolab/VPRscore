@@ -19,6 +19,9 @@ src/
                              (중복 variant는 경고 후 첫 값 유지).
   aggregate_vprscore.py     3단계: variant-level 테이블 + VCF genotype ->
                              sample-level VPRscore. single/multi-sample VCF 겸용.
+                             --vcf에 여러 파일(예: 염색체별 VCF)을 줄 수 있고,
+                             sample은 ID로 매칭되어 결과가 genome-wide VCF
+                             하나로 합쳐 돌린 것과 동일함.
   run_singlesample_vprscore.py
                              (하위호환용) calc_vprPrep.py + aggregate_vprscore.py를
                              순서대로 실행하는 원샷 wrapper.
@@ -44,6 +47,10 @@ env/
   (`None` 반환) 방어 코드 없이 바로 인덱싱하던 부분 수정 -> 이제 해당
   variant는 경고 로그를 남기고 NA로 처리, 파이프라인이 죽지 않음.
 - **[버그 수정]** SNV 여부 체크가 ALT만 하고 REF는 안 하던 것 수정 (`len(ref)==1` 추가).
+- **[신규]** `aggregate_vprscore.py --vcf`가 파일 여러 개(예: 염색체별 VCF)를
+  받을 수 있게 됨. sample 컬럼은 위치가 아니라 ID로 매칭되어 누적 합산되므로,
+  genome-wide VCF로 미리 concat할 필요가 없음 (genome-wide concat 결과와
+  수치 일치를 직접 검증함, sample 순서가 파일마다 달라도 동일함).
 - `--vcf`, `--regions` 등 실제로 안 쓰이던 죽은 인자 정리.
 - `env/requirements.txt`의 로컬 절대경로(`file:///mss_dc/...`) 의존성을
   git 설치 방식으로 교체 (`requirements-full.txt`).
@@ -79,28 +86,46 @@ python3 src/calc_vprPrep.py \
 CADD 점수만으로 계산합니다 (`alpha` 무시).
 
 ### chr 단위 병렬 처리 + 병합
+
+variant-level 계산(`calc_vprPrep.py`)은 genotype이 필요 없어서 chr별로
+완전히 독립적으로 병렬 실행할 수 있고, `aggregate_vprscore.py`의 sample별
+합산도 결합법칙이 성립해서 genome-wide VCF로 미리 합칠 필요가 없습니다.
+
 ```bash
-# chr별로 병렬 실행
+# 1) chr별 variant-level 계산 (genotype 불필요, 독립적)
 python3 src/calc_vprPrep.py --cadd cadd.19.tsv.gz --fasta ref.fa --chrom 19 --out prep.19.txt
 python3 src/calc_vprPrep.py --cadd cadd.20.tsv.gz --fasta ref.fa --chrom 20 --out prep.20.txt
 
-# 결과 병합 (중복 variant는 경고 후 첫 값 유지)
+# 2) 결과 병합 (중복 variant는 경고 후 첫 값 유지)
 python3 src/merge_vprPrep.py --inputs prep.19.txt prep.20.txt --out prep.merged.txt
+
+# 3) VCF도 chr별로 쪼개져 있다면, genome-wide로 concat할 필요 없이
+#    그대로 여러 개 넘기면 sample ID 기준으로 매칭해서 누적 합산됨
+python3 src/aggregate_vprscore.py \
+  --vcf sample.chr19.vcf.gz sample.chr20.vcf.gz \
+  --vprPrep prep.merged.txt --alpha 0.5 --beta 0.2 \
+  --out score.tsv
 ```
 
-## 전체 파이프라인 예시 (multi-sample)
+`--vcf`에 여러 파일을 줄 때는 모든 파일이 같은 sample 집합(부분집합 포함)을
+공유해야 하며, 컬럼 순서가 파일마다 달라도 sample ID로 매칭되므로 무관합니다.
+첫 VCF에 없던 sample ID가 뒤 파일에서 나오면 에러로 알려줍니다.
+
+## 전체 파이프라인 예시 (multi-sample, example 데이터만으로 바로 실행 가능)
 
 ```bash
 python3 src/prep_vprscore_input.py \
   --vcf example/example_multi.vcf.gz \
-  --cadd example/full_cadd.tsv.gz \
+  --cadd example/tmp_interval_multi.cadd.tsv.gz \
   --regions example/tmp_interval.bed \
   --out-prefix ./prep/multi
 
 python3 src/calc_vprPrep.py \
   --cadd ./prep/multi.cadd.tsv.gz \
-  --fasta example/chr19.fa \
+  --cadd-only \
   --out ./multi_prep.txt
+# 실제 NT 모델까지 쓰려면 --cadd-only 대신 --fasta example/chr19.fa 사용
+# (chr19.fa는 README 하단 링크에서 직접 받아야 함, 저장소엔 .fai만 포함돼 있음)
 
 python3 src/aggregate_vprscore.py \
   --vcf ./prep/multi.filtered.vcf.gz \
@@ -108,6 +133,12 @@ python3 src/aggregate_vprscore.py \
   --alpha 0.5 --beta 0.2 \
   --out ./multisample_vprscore.tsv
 ```
+
+`--cadd`에 넣는 파일(`prep_vprscore_input.py` 단계)은 genome-wide CADD 원본이어야
+하며, **bgzip + tabix 인덱스**가 되어 있어야 합니다(`bgzip file.tsv && tabix -s1 -b2 -e2 file.tsv.gz`).
+UKB 등에서 받은 whole_genome_SNVs.tsv.gz라면 이미 이 형식입니다.
+`example/tmp_interval*.cadd.tsv.gz`도 실행 검증을 위해 bgzip/tabix로 다시
+인덱싱해 두었습니다.
 
 Single-sample도 동일한 스크립트를 그대로 씁니다 (VCF에 샘플이 1개뿐이면 됨).
 원샷으로 하고 싶으면:
@@ -133,8 +164,11 @@ RawScore 분포(-6~+6대, 아래 참고)보다는 PHRED에 가까운 범위입�
 ## 검증 상태
 
 - 모든 스크립트 `py_compile` / `ast.parse` 통과.
-- `--cadd-only` 경로는 example 데이터(single/multi 둘 다)로 end-to-end 실행 확인
-  (jax/haiku 미설치 상태에서도 정상 동작 확인).
+- `--cadd-only` 경로는 **3단계 파이프라인 전체(`prep_vprscore_input.py` →
+  `calc_vprPrep.py` → `aggregate_vprscore.py`)를 example 데이터로 처음부터
+  끝까지 실행**해서 정상 종료 및 정상적인 sample별 VPRscore 출력 확인함
+  (jax/haiku 미설치 상태에서도 동작). `--chrom` 필터 + `merge_vprPrep.py`
+  병합도 별도로 실행 확인.
 - `merge_vprPrep.py`의 중복 variant 감지/경고 로직 실행 확인.
 - **NT 모델 경로(`--cadd-only` 없이)는 이 환경에 jax/haiku/nucleotide_transformer가
   설치되어 있지 않아 실행 검증을 못 했습니다.** `_run_forward`/`_compute_odds_ratio`

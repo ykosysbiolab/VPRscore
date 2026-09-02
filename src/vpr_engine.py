@@ -1,12 +1,12 @@
 """
 vpr_engine.py
 
-VPRscore의 variant-level 계산 로직을 한 곳에 모아둔 공용 모듈.
-- calc_vprPrep.py 에서 import 해서 씀
-- jax / haiku / nucleotide_transformer 는 무거운 GPU 의존성이라, 실제로
-  VPREngine 인스턴스를 만들 때(=NT 모델을 쓸 때)만 import 한다.
-  즉 --cadd-only 로 돌리는 경우에는 이 패키지들이 설치되어 있지 않아도
-  이 모듈을 문제없이 import 할 수 있다.
+Shared module for VPRscore's variant-level scoring logic.
+- Imported by calc_vprPrep.py.
+- jax / haiku / nucleotide_transformer are heavy GPU dependencies, so they are
+  only imported when a VPREngine instance is actually created (i.e. when the
+  NT model is used). This means --cadd-only mode can import this module
+  without those packages installed.
 """
 
 import gzip
@@ -21,20 +21,20 @@ MODEL_NAME = "500M_multi_species_v2"
 
 
 # ---------------------------------------------------------------------------
-# 공용 유틸
+# Shared utilities
 # ---------------------------------------------------------------------------
 
 def open_maybe_gzip(path):
-    """gzip이든 아니든 알아서 열어주는 헬퍼."""
+    """Open a file transparently, whether or not it's gzip-compressed."""
     if path.endswith(".gz"):
         return gzip.open(path, "rt")
     return open(path, "r")
 
 
 def norm_chrom(chrom):
-    """'chr19' -> '19' 처럼 chr 접두어만 벗겨서 '매칭용 키'를 만든다.
-    실제 출력/조회에는 원본 chrom 표기를 그대로 써야 한다 (아래 prep_vprscore_input.py 참고).
-    """
+    """Strip a 'chr' prefix (e.g. 'chr19' -> '19') to build a matching key.
+    The original chrom notation must still be used for output/lookup
+    (see prep_vprscore_input.py)."""
     c = chrom.strip()
     if c.lower().startswith("chr"):
         return c[3:]
@@ -42,34 +42,37 @@ def norm_chrom(chrom):
 
 
 def normalize_or(or_val, epsilon=1e-4):
-    """Odds ratio -> [0,1] 위험도 점수. OR>=1(발현 확률이 오히려 증가)인
-    경우는 위험도 0으로 clip 한다 (감소 방향만 '위험'으로 취급하는 설계)."""
+    """Odds ratio -> [0,1] risk score. OR>=1 (probability actually increases)
+    is clipped to risk 0 (only the decreasing direction is treated as 'risk'
+    by design)."""
     or_clipped = min(max(or_val, epsilon), 1)
     return -math.log10(or_clipped) / -math.log10(epsilon)
 
 
-# CADD RawScore(cols[4]에서 뽑은 값, PHRED 아님) 기준 99.9th percentile.
-# UKB whole_genome_SNVs.tsv.gz 전체(9억+ 줄, NR%1000 systematic sampling,
-# 2회 재현: 5.781617 / 5.656496)를 스트리밍으로 훑어서 얻은 값.
-# 원래 하드코딩돼 있던 max_cadd=30은 PHRED 스케일(PHRED>=30 = 상위 0.1%)
-# 관습에서 온 숫자라 RawScore(대부분 -6~+6대)에는 안 맞았음 -- 이 값으로 교체.
+# 99.9th percentile of CADD RawScore (the value pulled from cols[4], NOT
+# PHRED). Measured by streaming the entire UKB whole_genome_SNVs.tsv.gz
+# (900M+ lines, NR%1000 systematic sampling, reproduced twice: 5.781617 /
+# 5.656496). The old hardcoded max_cadd=30 came from PHRED-scale convention
+# (PHRED>=30 = top 0.1%) and didn't match the RawScore scale (mostly -6..+6)
+# -- replaced with this value.
 DEFAULT_MAX_CADD_RAW = 5.656496
 
 
 def normalize_cadd(cadd_score, max_cadd=DEFAULT_MAX_CADD_RAW):
-    """CADD RawScore -> [0,1] 위험도 점수.
-    음수 RawScore(=관찰된/정상 변이 패턴에 더 가까움)는 위험도 0으로 clip
-    (normalize_or가 OR>=1을 위험도 0으로 clip하는 것과 동일한 설계 원칙).
-    max_cadd는 상위 0.1%(99.9th percentile) 지점으로, PHRED>=30 관습을
-    RawScore 스케일로 옮겨온 값."""
+    """CADD RawScore -> [0,1] risk score.
+    Negative RawScore (= looks more like an observed/benign-pattern variant)
+    is clipped to risk 0 (same design principle as normalize_or clipping
+    OR>=1 to risk 0). max_cadd is the top 0.1% (99.9th percentile) point,
+    i.e. the PHRED>=30 convention carried over to the RawScore scale."""
     clipped = max(cadd_score, 0.0)
     return min(clipped, max_cadd) / max_cadd
 
 
 def find_variant_token(tokens, variant_offset):
-    """토큰화된 시퀀스에서 variant_offset(문자 단위 위치)이 속한 토큰의
-    인덱스를 찾는다. 못 찾으면 (None, None, valid_token_count) 반환."""
-    sequence_tokens = tokens[0][1:]  # CLS 토큰 제외
+    """Find the index of the token that contains variant_offset (a
+    character-level position) in a tokenized sequence.
+    Returns (None, None, valid_token_count) if not found."""
+    sequence_tokens = tokens[0][1:]  # drop the CLS token
     full_sequence = ""
     token_start_positions = []
     valid_token_count = 0
@@ -86,9 +89,10 @@ def find_variant_token(tokens, variant_offset):
 
 
 def get_sequence_from_fasta(chrom, start, end, fasta_file):
-    """samtools faidx로 chrom:start-end 서열을 가져온다.
-    shell=True 대신 리스트 인자로 호출 (인젝션/따옴표 문제 방지),
-    실패하면 stderr에 이유를 남기고 빈 문자열을 돌려준다."""
+    """Fetch the chrom:start-end sequence via samtools faidx.
+    Uses a list of args instead of shell=True (avoids injection/quoting
+    issues); on failure, logs the reason to stderr and returns an empty
+    string."""
     cmd = ["samtools", "faidx", fasta_file, f"{chrom}:{start}-{end}"]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -104,16 +108,16 @@ def get_sequence_from_fasta(chrom, start, end, fasta_file):
 
 
 # ---------------------------------------------------------------------------
-# NT 모델을 실제로 쓰는 부분 (--cadd-only 가 아닐 때만 인스턴스화됨)
+# NT model usage (only instantiated when NOT running --cadd-only)
 # ---------------------------------------------------------------------------
 
 class VPREngine:
-    """Nucleotide Transformer 기반 odds-ratio 계산기.
-    인스턴스를 만드는 순간 모델이 로딩된다 (무거운 작업)."""
+    """Nucleotide Transformer-based odds-ratio calculator.
+    The model is loaded as soon as an instance is created (heavyweight)."""
 
     def __init__(self, model_name=MODEL_NAME, max_tokens=MAX_TOKENS,
                  input_length=INPUT_LENGTH):
-        # 무거운 의존성은 여기서만 import (지연 import)
+        # Heavy dependencies are only imported here (lazy import)
         import haiku as hk
         import jax
         import jax.numpy as jnp
@@ -133,9 +137,10 @@ class VPREngine:
         self.config = config
 
     def _run_forward(self, sequence):
-        """시퀀스 하나를 토큰화 -> (필요시) truncate -> 모델 forward.
-        ref/var 양쪽 모두 동일하게 이 함수를 통해서 truncate 되므로
-        (예전 버그였던) 비대칭 truncation이 구조적으로 불가능하다."""
+        """Tokenize a sequence -> truncate (if needed) -> model forward pass.
+        Both ref and var sequences go through this same function, so the
+        asymmetric truncation bug that existed before is now structurally
+        impossible."""
         jnp = self._jnp
         tok = self.tokenizer.batch_tokenize([sequence.upper()])
         tokens_str = [b[0] for b in tok]
@@ -175,9 +180,10 @@ class VPREngine:
         return float(jnp.exp(log_odds_ratio))
 
     def score_variant(self, chrom, pos, ref_allele, alt_allele, fasta_file):
-        """(chrom,pos,ref,alt) 하나에 대한 odds ratio를 계산한다.
-        SNV가 아니거나(ref/alt 길이 != 1), 서열을 못 가져오거나,
-        토큰 위치를 못 찾으면 None을 반환한다 (호출부에서 NA로 기록)."""
+        """Compute the odds ratio for a single (chrom, pos, ref, alt).
+        Returns None if it's not a SNV (len(ref) != 1 or len(alt) != 1),
+        the sequence can't be fetched, or the token position can't be found
+        (the caller records this as NA)."""
         if len(ref_allele) != 1 or len(alt_allele) != 1 or alt_allele.upper() not in "ACGT":
             return None
 

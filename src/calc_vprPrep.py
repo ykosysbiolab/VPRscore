@@ -2,17 +2,17 @@
 """
 calc_vprPrep.py
 
-variant-level VPR(+CADD) 점수 테이블을 만든다.
-Sample-level aggregation과 완전히 분리된 레이어: genotype 필요 없이
-(chrom,pos,ref,alt) 목록만 있으면 된다. 그래서 single-sample과
-multi-sample 워크플로우가 이 스크립트를 그대로 공유한다
-(sample-level 합산은 aggregate_vprscore.py에서).
+Builds the variant-level VPR(+CADD) score table.
+A layer fully decoupled from sample-level aggregation: no genotypes needed,
+just a list of (chrom, pos, ref, alt). Single-sample and multi-sample
+workflows therefore share this same script as-is (sample-level summation
+happens in aggregate_vprscore.py).
 
---cadd-only 를 쓰면 NT 모델(jax/haiku/nucleotide_transformer)이
-전혀 필요 없다 -- 그 패키지들이 설치되어 있지 않아도 동작한다.
+With --cadd-only, the NT model (jax/haiku/nucleotide_transformer) isn't
+needed at all -- this runs fine without those packages installed.
 
---chrom 으로 특정 염색체만 처리해서 병렬로 돌린 뒤,
-merge_vprPrep.py로 합칠 수 있다.
+--chrom lets you process a single chromosome so runs can be parallelized,
+then merged back together with merge_vprPrep.py.
 """
 
 import argparse
@@ -36,7 +36,7 @@ def run_vpr_prep(cadd, fasta, out_path, cadd_only=False, chrom_filter=None,
             "n_vpr will be written as NA.\n"
         )
     else:
-        engine = VPREngine()  # 여기서 jax/haiku/nucleotide_transformer가 import & 모델 로딩됨
+        engine = VPREngine()  # jax/haiku/nucleotide_transformer are imported and the model loaded here
 
     n_rows = 0
     n_na = 0

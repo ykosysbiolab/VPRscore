@@ -2,12 +2,12 @@
 """
 run_singlesample_vprscore.py
 
-기존 REAME의 "one-step" 사용법과의 호환을 위해 남겨둔 wrapper 스크립트.
-내부적으로는 calc_vprPrep.py -> aggregate_vprscore.py 를 순서대로 실행한다
-(둘 다 이제 vpr_engine.py를 공유하는 동일 로직).
+Wrapper kept for compatibility with the old README's "one-step" usage.
+Internally runs calc_vprPrep.py -> aggregate_vprscore.py in sequence (both
+now share the same logic via vpr_engine.py).
 
-single-sample VCF를 가정하지만, sample이 여러 개인 VCF를 넣어도
-aggregate_vprscore.py가 알아서 각 샘플별 결과를 낸다.
+Assumes a single-sample VCF, but if a multi-sample VCF is passed in,
+aggregate_vprscore.py will still produce a per-sample result for each one.
 """
 
 import argparse
