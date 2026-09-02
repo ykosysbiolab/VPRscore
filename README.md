@@ -8,16 +8,12 @@ A pipeline that combines a Nucleotide-Transformer-based variant risk score
 ```
 src/
   vpr_engine.py             Shared logic (sequence extraction, NT model
-                             inference, normalization). jax/haiku/
-                             nucleotide_transformer are only imported when a
-                             VPREngine() is actually created (lazy) -> the
-                             --cadd-only mode works without these heavy
-                             packages installed.
+                             inference, normalization).
   prep_vprscore_input.py    Step 1: filter a VCF to target regions (BED) and
                              subset the CADD file to those variants.
   calc_vprPrep.py           Step 2: compute variant-level scores (no
-                             genotypes needed). Supports --cadd-only and
-                             --chrom.
+                             genotypes needed). Supports --chrom for
+                             per-chromosome parallelization.
   merge_vprPrep.py          Step 2b: merge results run in parallel with
                              --chrom splits into one table (duplicate
                              variants are logged and the first value is
@@ -33,11 +29,9 @@ src/
                              wrapper that runs calc_vprPrep.py +
                              aggregate_vprscore.py in sequence.
 env/
-  requirements-cadd-only.txt  Minimal dependencies for --cadd-only (standard
-                               library only).
-  requirements-full.txt       Full dependencies needed to also use the NT
-                               model (jax/haiku, etc.).
-  environment.yml             Conda environment (kept as-is).
+  requirements.txt          Dependencies needed to run the NT model
+                             (jax/haiku, etc.).
+  environment.yml           Conda environment (kept as-is).
 ```
 
 ## CADD normalization
@@ -58,19 +52,6 @@ CADD version/build -- recompute the percentile for that build's
 `whole_genome_SNVs.tsv.gz` rather than reusing this value as-is.
 
 ## Usage
-
-### CADD-only mode
-```bash
-python3 src/calc_vprPrep.py \
-  --cadd example/tmp_interval.cadd.tsv.gz \
-  --out ./prep.cadd_only.txt \
-  --cadd-only
-```
-This works without `jax`/`haiku`/`nucleotide_transformer` installed
-(`env/requirements-cadd-only.txt` is sufficient). The `n_vpr` column in the
-output is filled with `NA`, and the next step (`aggregate_vprscore.py`)
-automatically recognizes this and scores using CADD alone (ignoring
-`alpha`).
 
 ### Per-chromosome parallelization + merging
 
@@ -112,11 +93,10 @@ python3 src/prep_vprscore_input.py \
 
 python3 src/calc_vprPrep.py \
   --cadd ./prep/multi.cadd.tsv.gz \
-  --cadd-only \
+  --fasta example/chr19.fa \
   --out ./multi_prep.txt
-# To also use the actual NT model, use --fasta example/chr19.fa instead of
-# --cadd-only (chr19.fa must be downloaded separately via the link below --
-# only its .fai is included in this repo).
+# chr19.fa must be downloaded separately via the link below --
+# only its .fai is included in this repo.
 
 python3 src/aggregate_vprscore.py \
   --vcf ./prep/multi.filtered.vcf.gz \

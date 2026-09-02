@@ -14,7 +14,7 @@ jaxlib==0.4.30
 jmp==0.0.4
 joblib==1.4.2
 ml_dtypes==0.5.1
-nucleotide_transformer @ file:///mss_dc/project/ny/VEP/envs/NT/nucleotide-transformer
+nucleotide_transformer @ git+https://github.com/instadeepai/nucleotide-transformer.git
 numpy==2.0.2
 nvidia-cublas-cu12==12.6.4.1
 nvidia-cuda-cupti-cu12==12.6.80

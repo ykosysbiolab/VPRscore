@@ -124,7 +124,7 @@ def subset_cadd(cadd_path, regions_path, variant_keys, out_cadd_path):
                 pos = int(cols[1])
                 ref = cols[2]
                 alt = cols[3]
-                raw = cols[4]
+                raw = cols[4].strip()
             except (IndexError, ValueError):
                 continue
 
