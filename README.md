@@ -1,117 +1,138 @@
-# VPRscore (refactored)
+# VPRscore
 
-Nucleotide-Transformer 기반 variant risk score(VPR) + CADD를 결합해
-variant-level, sample-level 점수를 계산하는 파이프라인.
+A pipeline that combines a Nucleotide-Transformer-based variant risk score
+(VPR) with CADD to compute variant-level and sample-level risk scores.
 
-## 구조
+## Structure
 
 ```
 src/
-  vpr_engine.py             공용 로직 (서열 추출, NT 모델 추론, 정규화).
-                             jax/haiku/nucleotide_transformer는 VPREngine()을
-                             실제로 만들 때만 import됨 (lazy) -> --cadd-only
-                             모드는 이 무거운 패키지들 없이도 동작함.
-  prep_vprscore_input.py    1단계: VCF를 target region(BED)으로 필터링하고,
-                             CADD 파일을 그 variant들로 subset.
-  calc_vprPrep.py           2단계: variant-level 점수 계산 (genotype 불필요).
-                             --cadd-only, --chrom 지원.
-  merge_vprPrep.py          2-b단계: --chrom으로 나눠 돌린 결과들을 하나로 병합
-                             (중복 variant는 경고 후 첫 값 유지).
-  aggregate_vprscore.py     3단계: variant-level 테이블 + VCF genotype ->
-                             sample-level VPRscore. single/multi-sample VCF 겸용.
-                             --vcf에 여러 파일(예: 염색체별 VCF)을 줄 수 있고,
-                             sample은 ID로 매칭되어 결과가 genome-wide VCF
-                             하나로 합쳐 돌린 것과 동일함.
+  vpr_engine.py             Shared logic (sequence extraction, NT model
+                             inference, normalization). jax/haiku/
+                             nucleotide_transformer are only imported when a
+                             VPREngine() is actually created (lazy) -> the
+                             --cadd-only mode works without these heavy
+                             packages installed.
+  prep_vprscore_input.py    Step 1: filter a VCF to target regions (BED) and
+                             subset the CADD file to those variants.
+  calc_vprPrep.py           Step 2: compute variant-level scores (no
+                             genotypes needed). Supports --cadd-only and
+                             --chrom.
+  merge_vprPrep.py          Step 2b: merge results run in parallel with
+                             --chrom splits into one table (duplicate
+                             variants are logged and the first value is
+                             kept).
+  aggregate_vprscore.py     Step 3: variant-level table + VCF genotypes ->
+                             sample-level VPRscore. Works with single- or
+                             multi-sample VCFs. --vcf accepts multiple files
+                             (e.g. per-chromosome VCFs); samples are matched
+                             by ID, giving results identical to running on
+                             one genome-wide VCF.
   run_singlesample_vprscore.py
-                             (하위호환용) calc_vprPrep.py + aggregate_vprscore.py를
-                             순서대로 실행하는 원샷 wrapper.
+                             (kept for backward compatibility) one-shot
+                             wrapper that runs calc_vprPrep.py +
+                             aggregate_vprscore.py in sequence.
 env/
-  requirements-cadd-only.txt  --cadd-only 전용 최소 의존성 (표준 라이브러리만 사용).
-  requirements-full.txt       NT 모델까지 쓸 때 필요한 전체 의존성 (jax/haiku 등).
-  environment.yml             conda 환경 (기존 유지).
+  requirements-cadd-only.txt  Minimal dependencies for --cadd-only (standard
+                               library only).
+  requirements-full.txt       Full dependencies needed to also use the NT
+                               model (jax/haiku, etc.).
+  environment.yml             Conda environment (kept as-is).
 ```
 
-## 이전 버전과의 차이 (버그 수정 포함)
+## Changes from the previous version (including bug fixes)
 
-- `calc_multisample_vprPrep.py` / `run_singlesample_vprscore.py`에 중복돼 있던
-  모델·서열 로직을 `vpr_engine.py` 하나로 통합.
-- **[버그 수정]** REF 시퀀스가 ALT 시퀀스와 다르게 `max_tokens`로 잘리지 않던
-  비대칭 truncation 버그 수정 (`_run_forward`가 양쪽에 동일하게 적용됨).
-- **[버그 수정]** `prep_vprscore_input.py`가 CADD subset 출력에 chr 접두어를
-  무조건 제거해서 쓰던 것을 수정 -> 이제 VCF의 원본 chrom 표기를 그대로
-  유지해서 씀. 참조 FASTA가 `chr19`처럼 접두어 있는 명명을 쓰는 경우에도
-  `samtools faidx` 조회가 깨지지 않음.
-- **[버그 수정]** `run_single_sample_vprscore()`에서 variant가 0개일 때
-  `ZeroDivisionError` 나던 것 수정.
-- **[버그 수정]** `find_variant_token()`이 variant 위치를 못 찾을 때
-  (`None` 반환) 방어 코드 없이 바로 인덱싱하던 부분 수정 -> 이제 해당
-  variant는 경고 로그를 남기고 NA로 처리, 파이프라인이 죽지 않음.
-- **[버그 수정]** SNV 여부 체크가 ALT만 하고 REF는 안 하던 것 수정 (`len(ref)==1` 추가).
-- **[신규]** `aggregate_vprscore.py --vcf`가 파일 여러 개(예: 염색체별 VCF)를
-  받을 수 있게 됨. sample 컬럼은 위치가 아니라 ID로 매칭되어 누적 합산되므로,
-  genome-wide VCF로 미리 concat할 필요가 없음 (genome-wide concat 결과와
-  수치 일치를 직접 검증함, sample 순서가 파일마다 달라도 동일함).
-- `--vcf`, `--regions` 등 실제로 안 쓰이던 죽은 인자 정리.
-- `env/requirements.txt`의 로컬 절대경로(`file:///mss_dc/...`) 의존성을
-  git 설치 방식으로 교체 (`requirements-full.txt`).
-- **[정규화 수정]** `normalize_cadd()`의 `max_cadd` 기본값을 `30`에서
-  `5.656496`으로 교체. `--cadd` 입력의 5번째 컬럼(`cols[4]`)은 CADD의
-  **RawScore**이지 PHRED가 아닌데(공식 CADD tsv 컬럼 순서:
-  `Chrom Pos Ref Alt RawScore PHRED`), 기존 `max_cadd=30`은 PHRED 관습
-  (PHRED>=30 = 상위 0.1%)에서 온 값이라 RawScore(대부분 -6~+6대)에
-  적용하면 거의 모든 variant가 0 근처로 눌리고, 음수 RawScore는 그대로
-  음수 `n_cadd`가 되는 문제가 있었음. 새 기본값은
-  `whole_genome_SNVs.tsv.gz` 전체를 systematic sampling(NR%1000)으로
-  스트리밍해서 구한 RawScore의 **99.9th percentile**(두 차례 독립
-  샘플링에서 5.781617 / 5.656496으로 재현) -- PHRED>=30 관습을
-  RawScore 스케일로 옮겨온 값. 동시에 음수 RawScore는 위험도 0으로
-  clip하도록 함 (`normalize_or`가 OR>=1을 0으로 clip하는 것과 동일한
-  설계 원칙). `calc_vprPrep.py --max-cadd`로 오버라이드 가능
-  (CADD 버전/빌드가 다르면 재계산해서 넘길 것).
-  **주의**: 이 변경은 기존 결과와 수치가 달라짐 -- 이전 결과와 비교하려면
-  `--max-cadd 30`으로 예전 동작을 재현할 수 있음.
+- Consolidated model/sequence logic that was duplicated between
+  `calc_multisample_vprPrep.py` / `run_singlesample_vprscore.py` into a
+  single `vpr_engine.py`.
+- **[Bug fix]** Fixed an asymmetric truncation bug where the REF sequence
+  wasn't truncated to `max_tokens` the same way the ALT sequence was
+  (`_run_forward` now applies truncation identically to both).
+- **[Bug fix]** `prep_vprscore_input.py` used to unconditionally strip the
+  `chr` prefix in the CADD subset output -> it now keeps the VCF's original
+  chrom notation. This means `samtools faidx` lookups no longer break when
+  the reference FASTA uses prefixed naming like `chr19`.
+- **[Bug fix]** Fixed a `ZeroDivisionError` in what was
+  `run_single_sample_vprscore()` when a sample had zero variants.
+- **[Bug fix]** Fixed `find_variant_token()` indexing directly into its
+  result without checking for `None` when the variant position couldn't be
+  found -> that variant is now logged as a warning and recorded as NA
+  instead of crashing the pipeline.
+- **[Bug fix]** Fixed the SNV check only validating ALT and not REF (added
+  `len(ref)==1`).
+- **[New]** `aggregate_vprscore.py --vcf` now accepts multiple files (e.g.
+  per-chromosome VCFs). Sample columns are matched by ID rather than
+  position and accumulated, so there's no need to concat into a
+  genome-wide VCF first (verified to produce numerically identical results
+  to a genome-wide concat, even when sample order differs across files).
+- Removed dead arguments that weren't actually used (e.g. some instances of
+  `--vcf`, `--regions`).
+- Replaced the local absolute-path dependency
+  (`file:///mss_dc/...`) in `env/requirements.txt` with a git-installable
+  one (`requirements-full.txt`).
+- **[Normalization fix]** Changed `normalize_cadd()`'s `max_cadd` default
+  from `30` to `5.656496`. Column 5 (`cols[4]`) of the `--cadd` input is
+  CADD's **RawScore**, not PHRED (the official CADD tsv column order is
+  `Chrom Pos Ref Alt RawScore PHRED`). The old `max_cadd=30` came from
+  PHRED-scale convention (PHRED>=30 = top 0.1%), which doesn't fit RawScore
+  (mostly in the -6..+6 range) -- applying it crushed nearly every variant
+  toward 0, and negative RawScores passed straight through as a negative
+  `n_cadd`. The new default is the **99.9th percentile** of RawScore,
+  measured by streaming the entire `whole_genome_SNVs.tsv.gz` with
+  systematic sampling (NR%1000; reproduced across two independent samples
+  as 5.781617 / 5.656496) -- i.e. the PHRED>=30 convention carried over to
+  the RawScore scale. Negative RawScore is now also clipped to risk 0 (the
+  same design principle `normalize_or` uses for OR>=1). Override with
+  `calc_vprPrep.py --max-cadd` (recompute this if you're on a different
+  CADD version/build).
+  **Note**: this changes numeric results from before -- pass `--max-cadd 30`
+  to reproduce the old behavior for comparison.
 
-## 신규 기능
+## New features
 
-### CADD-only 모드
+### CADD-only mode
 ```bash
 python3 src/calc_vprPrep.py \
   --cadd example/tmp_interval.cadd.tsv.gz \
   --out ./prep.cadd_only.txt \
   --cadd-only
 ```
-`jax`/`haiku`/`nucleotide_transformer`가 설치되어 있지 않아도 동작합니다
-(`env/requirements-cadd-only.txt`만으로 충분). 출력의 `n_vpr` 컬럼은 `NA`로
-채워지고, 다음 단계(`aggregate_vprscore.py`)가 이를 자동으로 인식해
-CADD 점수만으로 계산합니다 (`alpha` 무시).
+This works without `jax`/`haiku`/`nucleotide_transformer` installed
+(`env/requirements-cadd-only.txt` is sufficient). The `n_vpr` column in the
+output is filled with `NA`, and the next step (`aggregate_vprscore.py`)
+automatically recognizes this and scores using CADD alone (ignoring
+`alpha`).
 
-### chr 단위 병렬 처리 + 병합
+### Per-chromosome parallelization + merging
 
-variant-level 계산(`calc_vprPrep.py`)은 genotype이 필요 없어서 chr별로
-완전히 독립적으로 병렬 실행할 수 있고, `aggregate_vprscore.py`의 sample별
-합산도 결합법칙이 성립해서 genome-wide VCF로 미리 합칠 필요가 없습니다.
+Variant-level computation (`calc_vprPrep.py`) doesn't need genotypes, so it
+can be run fully independently per chromosome in parallel. Sample-level
+summation in `aggregate_vprscore.py` is also associative, so there's no
+need to pre-merge into a genome-wide VCF.
 
 ```bash
-# 1) chr별 variant-level 계산 (genotype 불필요, 독립적)
+# 1) Compute variant-level scores per chromosome (no genotypes needed, independent)
 python3 src/calc_vprPrep.py --cadd cadd.19.tsv.gz --fasta ref.fa --chrom 19 --out prep.19.txt
 python3 src/calc_vprPrep.py --cadd cadd.20.tsv.gz --fasta ref.fa --chrom 20 --out prep.20.txt
 
-# 2) 결과 병합 (중복 variant는 경고 후 첫 값 유지)
+# 2) Merge the results (duplicate variants are logged and the first value kept)
 python3 src/merge_vprPrep.py --inputs prep.19.txt prep.20.txt --out prep.merged.txt
 
-# 3) VCF도 chr별로 쪼개져 있다면, genome-wide로 concat할 필요 없이
-#    그대로 여러 개 넘기면 sample ID 기준으로 매칭해서 누적 합산됨
+# 3) If the VCF is also split by chromosome, pass the files directly --
+#    no need to concat into a genome-wide VCF; samples are matched by ID
+#    and accumulated
 python3 src/aggregate_vprscore.py \
   --vcf sample.chr19.vcf.gz sample.chr20.vcf.gz \
   --vprPrep prep.merged.txt --alpha 0.5 --beta 0.2 \
   --out score.tsv
 ```
 
-`--vcf`에 여러 파일을 줄 때는 모든 파일이 같은 sample 집합(부분집합 포함)을
-공유해야 하며, 컬럼 순서가 파일마다 달라도 sample ID로 매칭되므로 무관합니다.
-첫 VCF에 없던 sample ID가 뒤 파일에서 나오면 에러로 알려줍니다.
+When passing multiple files to `--vcf`, all files must share the same
+sample set (subsets are fine); column order can differ across files since
+matching is done by sample ID. An error is raised if a later file contains
+a sample ID not present in the first VCF.
 
-## 전체 파이프라인 예시 (multi-sample, example 데이터만으로 바로 실행 가능)
+## Full pipeline example (multi-sample, runnable as-is with the example data)
 
 ```bash
 python3 src/prep_vprscore_input.py \
@@ -124,8 +145,9 @@ python3 src/calc_vprPrep.py \
   --cadd ./prep/multi.cadd.tsv.gz \
   --cadd-only \
   --out ./multi_prep.txt
-# 실제 NT 모델까지 쓰려면 --cadd-only 대신 --fasta example/chr19.fa 사용
-# (chr19.fa는 README 하단 링크에서 직접 받아야 함, 저장소엔 .fai만 포함돼 있음)
+# To also use the actual NT model, use --fasta example/chr19.fa instead of
+# --cadd-only (chr19.fa must be downloaded separately via the link below --
+# only its .fai is included in this repo).
 
 python3 src/aggregate_vprscore.py \
   --vcf ./prep/multi.filtered.vcf.gz \
@@ -134,14 +156,15 @@ python3 src/aggregate_vprscore.py \
   --out ./multisample_vprscore.tsv
 ```
 
-`--cadd`에 넣는 파일(`prep_vprscore_input.py` 단계)은 genome-wide CADD 원본이어야
-하며, **bgzip + tabix 인덱스**가 되어 있어야 합니다(`bgzip file.tsv && tabix -s1 -b2 -e2 file.tsv.gz`).
-UKB 등에서 받은 whole_genome_SNVs.tsv.gz라면 이미 이 형식입니다.
-`example/tmp_interval*.cadd.tsv.gz`도 실행 검증을 위해 bgzip/tabix로 다시
-인덱싱해 두었습니다.
+The file passed to `--cadd` in the `prep_vprscore_input.py` step must be the
+genome-wide CADD original, and must be **bgzip-compressed with a tabix
+index** (`bgzip file.tsv && tabix -s1 -b2 -e2 file.tsv.gz`). A
+`whole_genome_SNVs.tsv.gz` downloaded from sources like UK Biobank is
+already in this format. `example/tmp_interval*.cadd.tsv.gz` have also been
+re-indexed with bgzip/tabix for this to run end to end.
 
-Single-sample도 동일한 스크립트를 그대로 씁니다 (VCF에 샘플이 1개뿐이면 됨).
-원샷으로 하고 싶으면:
+Single-sample runs use the same scripts as-is (just use a VCF with one
+sample). For a one-shot run:
 
 ```bash
 python3 src/run_singlesample_vprscore.py \
@@ -152,26 +175,30 @@ python3 src/run_singlesample_vprscore.py \
   --out ./singlesample_vprscore.tsv
 ```
 
-## 참고: example/ 데이터의 CADD 값
+## Note: CADD values in example/ data
 
-`example/tmp_interval*.cadd.tsv.gz`의 5번째 컬럼 값(3.8~6.9대)은 실제
-RawScore 분포(-6~+6대, 아래 참고)보다는 PHRED에 가까운 범위입니다.
-데모용으로 만들어진 값으로 보이며, 새 기본 `max_cadd`(RawScore 기준)를
-적용하면 대부분 1.0으로 clip됩니다 -- 파이프라인 동작 자체엔 문제
-없지만, 실제 CADD RawScore subset으로 재현 테스트할 때는 이 값이
-그대로 재현되지 않을 수 있습니다.
+The 5th-column values (roughly 3.8-6.9) in `example/tmp_interval*.cadd.tsv.gz`
+are closer to the PHRED range than the actual RawScore distribution
+(roughly -6..+6, see above). These look like demo values -- with the new
+RawScore-based `max_cadd` default, most of them will clip to 1.0. This
+doesn't affect pipeline behavior, but reproducing this exact value with a
+real CADD RawScore subset may not give the same numbers.
 
-## 검증 상태
+## Verification status
 
-- 모든 스크립트 `py_compile` / `ast.parse` 통과.
-- `--cadd-only` 경로는 **3단계 파이프라인 전체(`prep_vprscore_input.py` →
-  `calc_vprPrep.py` → `aggregate_vprscore.py`)를 example 데이터로 처음부터
-  끝까지 실행**해서 정상 종료 및 정상적인 sample별 VPRscore 출력 확인함
-  (jax/haiku 미설치 상태에서도 동작). `--chrom` 필터 + `merge_vprPrep.py`
-  병합도 별도로 실행 확인.
-- `merge_vprPrep.py`의 중복 variant 감지/경고 로직 실행 확인.
-- **NT 모델 경로(`--cadd-only` 없이)는 이 환경에 jax/haiku/nucleotide_transformer가
-  설치되어 있지 않아 실행 검증을 못 했습니다.** `_run_forward`/`_compute_odds_ratio`
-  로직은 원본 코드 흐름을 그대로 유지(양쪽 truncation만 수정)했으므로 동작상
-  차이는 없을 것으로 예상되지만, GPU 환경에서 실제 모델로 한 번 돌려서
-  기존 결과와 대조해보는 걸 권장합니다.
+- All scripts pass `py_compile` / `ast.parse`.
+- The `--cadd-only` path was run **end to end through the full 3-step
+  pipeline** (`prep_vprscore_input.py` -> `calc_vprPrep.py` ->
+  `aggregate_vprscore.py`) on the example data, confirming a clean exit and
+  correct per-sample VPRscore output (works without jax/haiku installed).
+  The `--chrom` filter + `merge_vprPrep.py` merge path was also verified
+  separately.
+- `merge_vprPrep.py`'s duplicate-variant detection/warning logic was
+  exercised and verified.
+- **The NT-model path (without `--cadd-only`) could not be run in this
+  environment** since jax/haiku/nucleotide_transformer aren't installed
+  here. The `_run_forward`/`_compute_odds_ratio` logic preserves the
+  original code's flow (only the truncation symmetry was fixed), so no
+  behavioral difference is expected, but running it once against real
+  model weights in a GPU environment and comparing against prior results is
+  recommended.
