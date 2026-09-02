@@ -1,4 +1,4 @@
-# VPRscore
+# VPRscore (refactored)
 
 A pipeline that combines a Nucleotide-Transformer-based variant risk score
 (VPR) with CADD to compute variant-level and sample-level risk scores.
@@ -40,55 +40,24 @@ env/
   environment.yml             Conda environment (kept as-is).
 ```
 
-## Changes from the previous version (including bug fixes)
+## CADD normalization
 
-- Consolidated model/sequence logic that was duplicated between
-  `calc_multisample_vprPrep.py` / `run_singlesample_vprscore.py` into a
-  single `vpr_engine.py`.
-- **[Bug fix]** Fixed an asymmetric truncation bug where the REF sequence
-  wasn't truncated to `max_tokens` the same way the ALT sequence was
-  (`_run_forward` now applies truncation identically to both).
-- **[Bug fix]** `prep_vprscore_input.py` used to unconditionally strip the
-  `chr` prefix in the CADD subset output -> it now keeps the VCF's original
-  chrom notation. This means `samtools faidx` lookups no longer break when
-  the reference FASTA uses prefixed naming like `chr19`.
-- **[Bug fix]** Fixed a `ZeroDivisionError` in what was
-  `run_single_sample_vprscore()` when a sample had zero variants.
-- **[Bug fix]** Fixed `find_variant_token()` indexing directly into its
-  result without checking for `None` when the variant position couldn't be
-  found -> that variant is now logged as a warning and recorded as NA
-  instead of crashing the pipeline.
-- **[Bug fix]** Fixed the SNV check only validating ALT and not REF (added
-  `len(ref)==1`).
-- **[New]** `aggregate_vprscore.py --vcf` now accepts multiple files (e.g.
-  per-chromosome VCFs). Sample columns are matched by ID rather than
-  position and accumulated, so there's no need to concat into a
-  genome-wide VCF first (verified to produce numerically identical results
-  to a genome-wide concat, even when sample order differs across files).
-- Removed dead arguments that weren't actually used (e.g. some instances of
-  `--vcf`, `--regions`).
-- Replaced the local absolute-path dependency
-  (`file:///mss_dc/...`) in `env/requirements.txt` with a git-installable
-  one (`requirements-full.txt`).
-- **[Normalization fix]** Changed `normalize_cadd()`'s `max_cadd` default
-  from `30` to `5.656496`. Column 5 (`cols[4]`) of the `--cadd` input is
-  CADD's **RawScore**, not PHRED (the official CADD tsv column order is
-  `Chrom Pos Ref Alt RawScore PHRED`). The old `max_cadd=30` came from
-  PHRED-scale convention (PHRED>=30 = top 0.1%), which doesn't fit RawScore
-  (mostly in the -6..+6 range) -- applying it crushed nearly every variant
-  toward 0, and negative RawScores passed straight through as a negative
-  `n_cadd`. The new default is the **99.9th percentile** of RawScore,
-  measured by streaming the entire `whole_genome_SNVs.tsv.gz` with
-  systematic sampling (NR%1000; reproduced across two independent samples
-  as 5.781617 / 5.656496) -- i.e. the PHRED>=30 convention carried over to
-  the RawScore scale. Negative RawScore is now also clipped to risk 0 (the
-  same design principle `normalize_or` uses for OR>=1). Override with
-  `calc_vprPrep.py --max-cadd` (recompute this if you're on a different
-  CADD version/build).
-  **Note**: this changes numeric results from before -- pass `--max-cadd 30`
-  to reproduce the old behavior for comparison.
+The `--cadd` input's 5th column (`cols[4]`) is expected to be CADD
+**RawScore** (not PHRED; the official CADD tsv column order is
+`Chrom Pos Ref Alt RawScore PHRED`). `normalize_cadd()` maps this to a
+`[0,1]` score as `clip(raw, 0, max_cadd) / max_cadd`: negative RawScore
+(more similar to an observed/benign-pattern variant) clips to 0, and the
+default `max_cadd = 5.656496` is the RawScore's 99.9th percentile, measured
+by streaming the full `whole_genome_SNVs.tsv.gz` genome-wide (systematic
+sampling, NR%1000; reproduced across two independent samples as 5.781617 /
+5.656496). This mirrors the standard PHRED>=30 ("top 0.1% most deleterious")
+convention, carried over to the RawScore scale.
 
-## New features
+Override with `calc_vprPrep.py --max-cadd <value>` if you're on a different
+CADD version/build -- recompute the percentile for that build's
+`whole_genome_SNVs.tsv.gz` rather than reusing this value as-is.
+
+## Usage
 
 ### CADD-only mode
 ```bash
@@ -183,22 +152,3 @@ are closer to the PHRED range than the actual RawScore distribution
 RawScore-based `max_cadd` default, most of them will clip to 1.0. This
 doesn't affect pipeline behavior, but reproducing this exact value with a
 real CADD RawScore subset may not give the same numbers.
-
-## Verification status
-
-- All scripts pass `py_compile` / `ast.parse`.
-- The `--cadd-only` path was run **end to end through the full 3-step
-  pipeline** (`prep_vprscore_input.py` -> `calc_vprPrep.py` ->
-  `aggregate_vprscore.py`) on the example data, confirming a clean exit and
-  correct per-sample VPRscore output (works without jax/haiku installed).
-  The `--chrom` filter + `merge_vprPrep.py` merge path was also verified
-  separately.
-- `merge_vprPrep.py`'s duplicate-variant detection/warning logic was
-  exercised and verified.
-- **The NT-model path (without `--cadd-only`) could not be run in this
-  environment** since jax/haiku/nucleotide_transformer aren't installed
-  here. The `_run_forward`/`_compute_odds_ratio` logic preserves the
-  original code's flow (only the truncation symmetry was fixed), so no
-  behavioral difference is expected, but running it once against real
-  model weights in a GPU environment and comparing against prior results is
-  recommended.
